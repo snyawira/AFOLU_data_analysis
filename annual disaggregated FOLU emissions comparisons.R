@@ -13,7 +13,11 @@ library(tidyverse)
 library(janitor)
 library(ggplot2)
 library(countrycode)
-#rm(list=ls())
+library(ncdf4)
+
+############SOURCE FUNCTIONS IN A DIFFERENT FILE################
+source("disaggregated_FOLU_timesclices.R")
+
 
 df1   <- read.csv("Houghton_annual net flux_by land use_countries.csv", header = FALSE) ##Houghtons bookkeeping model
 df2   <- read.csv("FOLU_FAOSTAT_emissions_1990-2017.csv", header = TRUE) ##FAOSTAT FOLU emissions and removal
@@ -74,9 +78,7 @@ country1.names<-unique(df1.tp$Country)
 df1.tp.n <- df1.tp %>%
   transform(Year=as.integer(Year),Emissions = as.numeric(Emissions)) %>%
   mutate(CO2 = Emissions * 44/12 * 0.001) %>% ###Convert carbon to CO2 and Teragrams into Gigatonnes###
-  mutate(NewCountry=countrycode(Country, origin  = 'country.name', destination = 'iso.name.en'))%>%
   filter(Year >= 1990 & Year <= 2015) %>% 
-  rename(OldCountryName=Country, Country=NewCountry)%>%
   select(REGION, Country, Process, Year, CO2) 
 ######FAOSTAT data all FOLU emissions per LandUse##################
 df2.tp.n <- df2 %>%
@@ -95,33 +97,37 @@ df3.tp.n <- df3 %>%
   rename(Process=Item)%>%
   select(Country, Process, Year, CO2) 
 
+##########HOUGHTON BOOK KEEPING MODEL DATA#########################
 #######Deforestation emissions Houghton############################################
 df1.tp.def <- df1.tp.n %>%
   group_by(Year)%>%
   filter((Process == "FP" | Process == "FC"| Process == "FCO" ))  %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
-
+#########Emissions/sinks from forestry####################
 df1.tp.fry <- df1.tp.n %>%
   group_by(Year)%>%
   filter((Process == "FUEL"| Process == "IND")) %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
-
+########Other land use emissions data######################
 df1.tp.oLU <- df1.tp.n %>%
   group_by(Year)%>%
   filter((Process == "CP"| Process == "OC" | Process == "OP" | Process == "FIRE" |Process == "PLANT")) %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
 
+
+####################FAOSTAT############################################
 ########Deforestation emissions FAOSTAT###################################
 df3.tp.dep <- df3.tp.n %>%
   group_by(Year)%>%
   filter((Process == "Net Forest conversion")) %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
 
+########Other forestry emsission/sinks##########################
 df3.tp.fry <- df3.tp.n %>%
   group_by(Year)%>%
   filter((Process == "Forest land")) %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
-
+##########Other land use emissions#############################
 df2.tp.oLU <- df2.tp.n %>%
   group_by(Year)%>%
   filter((Process == "Burning Biomass" | Process == "Cropland" | Process == "Grassland")) %>%
@@ -134,7 +140,7 @@ df3.tp.n %>%
   summarise(CO2ann=sum(CO2, na.rm=TRUE))
 
 
-##########Houghton and FAOSTAT deforestation emission###########################
+###############CALLL THE FUNCTIONS TO CALCULATE DIFFERENT COMPONENTS OF FOLU emissions on different time slices##################
 ###########Houghton: deforestration, other land use and harvest emissions#######################################
 df1.tp.def.t1 <- global_deforestation_timeSlice_HN(df1.tp.n, 1991, 2000)
 df1.tp.def.t2 <- global_deforestation_timeSlice_HN(df1.tp.n, 2001, 2010)
@@ -252,48 +258,6 @@ ggplot(dfc.totoFr.m, aes(fill=Source, y=value, x=Period)) +
         strip.text=element_text(colour="black",size=10), panel.grid.minor=element_blank(),
         axis.text.x=element_text(colour="black",size=12), axis.text.y=element_text(colour="black",size=12),
         axis.ticks.x=element_line(colour="black"),axis.ticks.y=element_line(colour="black"))
-
-
-##################FUNCTIONS#######################################
-global_deforestation_timeSlice_HN <- function(data, startYear, endYear) {
-  data %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear & (.data$Process == "FP" | .data$Process == "FC" |
-                                                                 .data$Process == "FCO")) %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
-global_oLandUse_timeSlice_HN <- function(data, startYear, endYear) {
-  data %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear &  
-             (.data$Process == "CP" | .data$Process == "OC" | .data$Process == "OP" | .data$Process == "FIRE" |
-                .data$Process == "PLANT" )) %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
-global_forestry_timeSlice_HN <- function(data, startYear, endYear) {
-  data %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear &  
-             (.data$Process == "FUEL" | .data$Process == "IND")) %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
-
-global_deforestation_timeSlice_FAO <- function(data, startYear, endYear) {
-  data %>%
-    ungroup() %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear & .data$Process == "Net Forest conversion") %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
-global_forest_timeSlice_FAO <- function(data, startYear, endYear) {
-  data %>%
-    ungroup() %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear & .data$Process == "Forest land") %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
-global_oLandUse_timeSlice_FAO <- function(data, startYear, endYear) {
-  data %>%
-    filter(.data$Year >= startYear &  .data$Year <= endYear &  
-             (.data$Process == "Burning Biomass" | .data$Process == "Cropland" |
-                .data$Process == "Grassland")) %>%
-    summarise(CO2tot=(sum(.data$CO2, na.rm=TRUE))/((endYear-startYear)+1))
-}
 
 
 
